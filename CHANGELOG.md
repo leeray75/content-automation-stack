@@ -8,10 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- [issue-2](https://github.com/leeray75/content-automation-stack/issues/2) - Fixed MCP ingestion service crash due to missing pino-pretty dependency
 - [issue-1](https://github.com/leeray75/content-automation-stack/issues/1) - Fixed Docker health checks and service startup issues
 - Resolved API service health check failures by switching from curl-based to Node.js-based health checks
 - Fixed long startup times by optimizing health check configuration and start periods
 - Added curl package to API service Dockerfile for compatibility
+- Resolved MCP ingestion service restart loop caused by logger configuration error
+- Added pino-pretty dependency to production dependencies for proper logging functionality
 
 ## [1.0.0] - 2025-09-22
 ### Added
