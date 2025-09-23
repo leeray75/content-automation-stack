@@ -1,0 +1,9 @@
+[submodule "services/content-automation-api"]
+	path = services/content-automation-api
+	url = https://github.com/leeray75/content-automation-api.git
+[submodule "services/content-automation-ui"]
+	path = services/content-automation-ui
+	url = https://github.com/leeray75/content-automation-ui.git
+[submodule "services/content-automation-mcp-ingestion"]
+	path = services/content-automation-mcp-ingestion
+	url = https://github.com/leeray75/content-automation-mcp-ingestion.git

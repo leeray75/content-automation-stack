@@ -1,0 +1,81 @@
+services:
+  content-automation-api:
+    build:
+      context: ./services/content-automation-api
+      dockerfile: Dockerfile
+    container_name: content-automation-api
+    ports:
+      - "${API_PORT:-3000}:3000"
+    environment:
+      - NODE_ENV=${NODE_ENV:-development}
+      - PORT=3000
+      - DATABASE_URL=${DATABASE_URL:-}
+      - JWT_SECRET=${JWT_SECRET:-dev-secret}
+    networks:
+      - content-automation-network
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) })"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  content-automation-ui:
+    build:
+      context: ./services/content-automation-ui
+      dockerfile: Dockerfile
+    container_name: content-automation-ui
+    ports:
+      - "${UI_PORT:-3001}:3000"
+    environment:
+      - NODE_ENV=${NODE_ENV:-development}
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:3000}
+    networks:
+      - content-automation-network
+    depends_on:
+      content-automation-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) })"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+
+  content-automation-mcp-ingestion:
+    build:
+      context: ./services/content-automation-mcp-ingestion
+      dockerfile: Dockerfile
+    container_name: content-automation-mcp-ingestion
+    ports:
+      - "${MCP_PORT:-3002}:3001"
+    environment:
+      - NODE_ENV=${NODE_ENV:-development}
+      - PORT=3001
+      - MCP_SERVER_NAME=${MCP_SERVER_NAME:-content-automation-mcp-ingestion}
+      - MCP_SERVER_VERSION=${MCP_SERVER_VERSION:-0.1.0}
+      - MCP_AUTH_ENABLED=${MCP_AUTH_ENABLED:-false}
+    networks:
+      - content-automation-network
+    depends_on:
+      content-automation-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3001/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) })"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+
+networks:
+  content-automation-network:
+    driver: bridge
+    name: content-automation-network
+
+volumes:
+  api_node_modules:
+  ui_node_modules:
+  mcp_node_modules:
