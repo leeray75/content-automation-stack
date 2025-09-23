@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- [issue-5](https://github.com/leeray75/content-automation-stack/issues/5) - Optional OpenProject and Penpot integrations for manifest-centric workflow
+- Docker Compose profiles for optional local integrations:
+  - `--profile openproject` - Project management with OpenProject
+  - `--profile penpot` - Design and prototyping with Penpot
+- OpenProject integration services:
+  - openproject-db (PostgreSQL 16)
+  - openproject (web interface on port 8082)
+  - Persistent volumes for database and application data
+  - Health checks and proper startup dependencies
+- Penpot integration services:
+  - penpot-db (PostgreSQL 16)
+  - penpot-redis (Redis 7)
+  - penpot-backend (API services on port 6060)
+  - penpot-frontend (web interface on port 9001)
+  - penpot-exporter (export services on port 6061)
+  - Persistent volumes for database and assets
+- Environment variable integration for core services:
+  - OPENPROJECT_BASE_URL and OPENPROJECT_API_TOKEN for API/UI/MCP services
+  - PENPOT_FRONTEND_URL, PENPOT_BACKEND_URL, PENPOT_EXPORTER_URL for service discovery
+  - Image tag overrides for enterprise deployment (OPENPROJECT_IMAGE_TAG, PENPOT_*_IMAGE_TAG)
+- Comprehensive documentation in README.md:
+  - "Optional Local Integrations" section with usage commands
+  - Service endpoints table and port mappings
+  - First-run setup procedures for OpenProject and Penpot
+  - Environment configuration guidance
+  - Enterprise deployment recommendations
+  - Data persistence management
+  - Health monitoring instructions
+  - Troubleshooting guides for optional services
+  - Integration code examples for developers
+
 ### Fixed
 - [issue-2](https://github.com/leeray75/content-automation-stack/issues/2) - Fixed MCP ingestion service crash due to missing pino-pretty dependency
 - [issue-1](https://github.com/leeray75/content-automation-stack/issues/1) - Fixed Docker health checks and service startup issues
