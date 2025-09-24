@@ -1,111 +1,127 @@
-Summary / goal
-- Problem: OpenProject is enforcing 2FA at the application/plugin level even though the admin user has no OTP devices, causing a login loop.
-- Goal: Restore admin web access safely (non‑destructive), then implement a repeatable, reversible fix to disable application‑level 2FA enforcement until you can reconfigure 2FA properly.
+Short answer
+- I inspected the OpenProject source and confirmed where 2FA enforcement is decided and loaded: modules/two_factor_authentication/lib/... (engine.rb, token_strategy_manager.rb, two_factor_settings_controller.rb). The plugin checks environment/configuration first and then falls back to DB settings. The simplest, supported fix is to set the documented environment switch to disable 2FA (OPENPROJECT_2FA_DISABLED=true) or to set OPENPROJECT_2FA_ENFORCED=false and restart. If that doesn't take effect (because configuration is cached or the plugin is loaded earlier), you can apply a reversible emergency initializer that forces the TokenStrategyManager to treat 2FA as not enforced.
 
-Safe plan (high level)
-1. Back up the OpenProject database.
-2. Temporarily disable application‑level 2FA enforcement (Setting.plugin_openproject_two_factor_authentication.enforced = false).
-3. Kill existing sessions so the change takes effect immediately.
-4. Verify you can log in via the web UI.
-5. If desired, remove plugin settings (reversible) or create a small admin script in repo so future recoveries are easier.
-6. Re-enable 2FA properly once you have email/OTP flows working and documented.
+What I found in the code (key locations)
+- modules/two_factor_authentication/lib/open_project/two_factor_authentication/engine.rb
+  - Registers the authentication stage conditionally: active: -> { ::OpenProject::TwoFactorAuthentication::TokenStrategyManager.enabled? } and runs TokenStrategyManager.validate_configuration! in config.to_prepare. This is where the 2FA stage is wired into the authentication flow.
+- modules/two_factor_authentication/lib/open_project/two_factor_authentication/token_strategy_manager.rb
+  - This module exposes methods like enabled?, enforced?, enforced_by_configuration?, configurable_by_ui? and reads the OpenProject::Configuration["2fa"] (which is populated from environment alias OPENPROJECT_2FA). The code therefore honors env/config before DB.
+- modules/two_factor_authentication/app/controllers/two_factor_authentication/two_factor_settings_controller.rb
+  - Handles writes to plugin settings (and checks Setting.plugin_openproject_two_factor_authentication_writable?).
+- docs show the supported env variables:
+  - OPENPROJECT_2FA_ENFORCED, OPENPROJECT_2FA_ACTIVE__STRATEGIES, and OPENPROJECT_2FA_DISABLED (docs explicitly note OPENPROJECT_2FA_DISABLED="true" will disable 2FA and remove menus).
 
-Commands you can run right now (non-destructive)
-1) Create an on‑host DB backup (important)
-- From the machine where you run docker compose:
-  docker compose exec -T openproject-db pg_dump -U openproject openproject > openproject_backup_$(date +%Y%m%dT%H%M%S).sql
+Diagnosis checklist (run these first — no code changes)
+1. Check effective configuration in Rails console:
+   - docker compose exec openproject bash -lc 'openproject run rails console --sandbox -e production'
+     Then run:
+     - p OpenProject::Configuration["2fa"]                 # environment/config values
+     - p Setting.plugin_openproject_two_factor_authentication # DB-stored plugin settings
+     - p OpenProject::TwoFactorAuthentication::TokenStrategyManager.enforced?
+     - p OpenProject::TwoFactorAuthentication::TokenStrategyManager.enabled?
+     - p OpenProject::TwoFactorAuthentication::TokenStrategyManager.configurable_by_ui?
 
-2) Check current plugin setting
-  docker compose exec -T openproject bash -lc 'openproject run rails runner "p Setting.plugin_openproject_two_factor_authentication"'
+   If OpenProject::Configuration["2fa"] shows enforced=true or OPENPROJECT_2FA_DISABLED is not set, the environment is still telling the plugin to enforce 2FA. If TokenStrategyManager.enforced? returns true despite DB showing enforced: false, the environment/config path is taking precedence.
 
-3) Disable 2FA enforcement (recommended immediate fix)
-- This sets the plugin config so 2FA is not enforced at app level:
-  docker compose exec -T openproject bash -lc 'openproject run rails runner "Setting.plugin_openproject_two_factor_authentication = {\"enforced\" => false, \"allow_remember_for_days\" => 0}; puts \"2FA enforcement disabled\""' 
+2. Ensure environment variables are set correctly in your runtime (docker-compose / container env):
+   - Preferred to fully disable 2FA quickly:
+     - OPENPROJECT_2FA_DISABLED=true
+   - Alternatively to allow 2FA but not enforce:
+     - OPENPROJECT_2FA_ENFORCED=false
+   - After changing compose/env, restart the openproject service:
+     - docker compose restart openproject
 
-4) (Optional) Delete plugin settings entirely (reversible but more blunt)
-- This removes any stored plugin config; the plugin may then use defaults or not run:
-  docker compose exec -T openproject bash -lc 'openproject run rails runner "Setting.where(name: \"plugin_openproject_two_factor_authentication\").delete_all; puts \"2FA plugin settings deleted\""' 
+Supported, recommended fixes (ordered)
+1) Easiest — set the documented environment flag to disable 2FA (safe & reversible)
+- Edit your docker-compose or container env and add:
+  - OPENPROJECT_2FA_DISABLED=true
+- Restart:
+  - docker compose restart openproject
+- Verify via rails runner or logs:
+  - docker compose exec openproject bash -lc 'openproject run rails runner "p OpenProject::Configuration['\"'2fa'\"'] ; p ::OpenProject::TwoFactorAuthentication::TokenStrategyManager.enabled?"'
 
-5) Clear sessions so all users (including admin) get fresh auth state
-  docker compose exec -T openproject bash -lc 'openproject run rails runner "ActiveRecord::Base.connection.execute(\"DELETE FROM sessions\") ; puts \"Sessions cleared\""' 
+2) If you cannot change environment variables or they don't take effect (config cached/loaded differently), set OPENPROJECT_2FA_ACTIVE__STRATEGIES to empty to remove active strategies:
+- OPENPROJECT_2FA_ACTIVE__STRATEGIES="[]"
+- Restart service.
 
-6) Verify setting after change
-  docker compose exec -T openproject bash -lc 'openproject run rails runner "p Setting.plugin_openproject_two_factor_authentication"'
+3) If env changes and restarts do not remove the 2FA stage (rare), use a reversible emergency initializer to force the plugin to treat enforcement as false at runtime. This is intended as an emergency recovery step and should be removed immediately after you regain access.
 
-7) Try to log in via web UI (http://localhost:8082) as admin. If you changed the admin password previously use that password.
+Proposed emergency initializer (add to your app, remove after recovery)
+```ruby name=config/initializers/emergency_disable_2fa.rb
+# Emergency: force TwoFactorAuthentication to be non-enforced at runtime.
+# Deploy only for emergency recovery, then remove and restart.
+if ENV['OPENPROJECT_EMERGENCY_DISABLE_2FA'] == 'true' || ENV['OPENPROJECT_2FA_DISABLED'] == 'true'
+  Rails.logger.warn '[emergency_disable_2fa] initializer loaded'
 
-If the Rails-runner commands complain about missing constants/paths, try replacing openproject run rails runner with bin/rails runner in the container command (both variants shown here work for typical OpenProject images):
-  docker compose exec -T openproject bash -lc 'bin/rails runner "puts Setting.plugin_openproject_two_factor_authentication"'
+  Rails.application.config.after_initialize do
+    begin
+      # Best-effort: set environment/config value so TokenStrategyManager sees it
+      OpenProject::Configuration['2fa'] ||= {}
+      OpenProject::Configuration['2fa']['enforced'] = false
+      OpenProject::Configuration['2fa']['disabled'] = true
+      Rails.logger.warn '[emergency_disable_2fa] OpenProject::Configuration[\"2fa\"] adjusted'
+    rescue => e
+      Rails.logger.warn "[emergency_disable_2fa] failed to set configuration: #{e.class}: #{e.message}"
+    end
 
-Verification checklist
-- After step (3) or (4) and clearing sessions, web login should no longer redirect to /two_factor_authentication/request.
-- The rails runner check should print something like {"enforced"=>false, ...} or nil (if deleted).
-- If login succeeds, immediately update admin account settings (password, add backup codes, configure 2FA) and document steps.
+    begin
+      # Monkeypatch TokenStrategyManager.enforced? and enabled? to return false
+      if defined?(OpenProject::TwoFactorAuthentication::TokenStrategyManager)
+        mod = OpenProject::TwoFactorAuthentication::TokenStrategyManager
+        mod.singleton_class.class_eval do
+          define_method(:enforced?) { false }
+          define_method(:enabled?) { false }
+        end
+        Rails.logger.warn '[emergency_disable_2fa] monkeypatched TokenStrategyManager.enforced?/enabled? => false'
+      end
+    rescue => e
+      Rails.logger.warn "[emergency_disable_2fa] monkeypatch failed: #{e.class}: #{e.message}"
+    end
 
-Reverting / re-enabling 2FA later
-- To re-enable enforcement:
-  docker compose exec -T openproject bash -lc 'openproject run rails runner "Setting.plugin_openproject_two_factor_authentication = {\"enforced\" => true, \"allow_remember_for_days\" => 0}; puts \"2FA enforcement enabled\""' 
-- Or restore the DB backup if you need to roll back changes (dangerous; will lose intervening changes).
-
-Make the fix repeatable (script)
-- I recommend adding a small maintenance script in your repo so you or teammates can run it quickly. Save this under ai-workspace/scripts/manage-openproject-2fa.sh and make executable.
-
-```bash name=ai-workspace/scripts/manage-openproject-2fa.sh
-#!/usr/bin/env bash
-# Usage: manage-openproject-2fa.sh status|disable|enable|delete|clear-sessions
-set -e
-ACTION=${1:-status}
-
-case "$ACTION" in
-  status)
-    docker compose exec -T openproject bash -lc 'openproject run rails runner "p Setting.plugin_openproject_two_factor_authentication"'
-    ;;
-  disable)
-    echo "Disabling 2FA enforcement..."
-    docker compose exec -T openproject bash -lc 'openproject run rails runner "Setting.plugin_openproject_two_factor_authentication = {\"enforced\" => false, \"allow_remember_for_days\" => 0}; puts \"2FA enforcement disabled\""' 
-    ;;
-  enable)
-    echo "Enabling 2FA enforcement..."
-    docker compose exec -T openproject bash -lc 'openproject run rails runner "Setting.plugin_openproject_two_factor_authentication = {\"enforced\" => true}; puts \"2FA enforcement enabled\""' 
-    ;;
-  delete)
-    echo "Deleting 2FA plugin settings..."
-    docker compose exec -T openproject bash -lc 'openproject run rails runner "Setting.where(name: \"plugin_openproject_two_factor_authentication\").delete_all; puts \"2FA plugin settings deleted\""' 
-    ;;
-  clear-sessions)
-    echo "Clearing sessions..."
-    docker compose exec -T openproject bash -lc 'openproject run rails runner "ActiveRecord::Base.connection.execute(\"DELETE FROM sessions\"); puts \"Sessions cleared\""' 
-    ;;
-  *)
-    echo "Usage: $0 status|disable|enable|delete|clear-sessions"
-    exit 2
-    ;;
-esac
+    begin
+      # Remove the two_factor_authentication stage from the Authentication::Stage registry if present
+      if defined?(OpenProject::Authentication::Stage)
+        begin
+          OpenProject::Authentication::Stage.unregister(:two_factor_authentication) if OpenProject::Authentication::Stage.registered?(:two_factor_authentication) rescue nil
+          Rails.logger.warn '[emergency_disable_2fa] attempted to unregister two_factor_authentication stage'
+        rescue => e
+          Rails.logger.warn "[emergency_disable_2fa] unregister attempt failed: #{e.class}: #{e.message}"
+        end
+      end
+    rescue => e
+      Rails.logger.warn "[emergency_disable_2fa] stage removal failed: #{e.class}: #{e.message}"
+    end
+  end
+end
 ```
 
-Usage: make executable (chmod +x ai-workspace/scripts/manage-openproject-2fa.sh) and run:
-- ./ai-workspace/scripts/manage-openproject-2fa.sh disable
-- ./ai-workspace/scripts/manage-openproject-2fa.sh clear-sessions
+Commands to deploy the initializer via Docker Compose (example)
+- Copy the file into the container app (or add to your source and redeploy). Quick approach using a here-doc into the container:
+  - docker compose exec openproject bash -lc "mkdir -p /app/config/initializers && cat > /app/config/initializers/emergency_disable_2fa.rb <<'RB'\n[paste file contents here]\nRB"
+- Set the emergency environment variable:
+  - Add to your compose service (openproject): environment: - OPENPROJECT_EMERGENCY_DISABLE_2FA=true
+- Restart:
+  - docker compose restart openproject
+- Tail logs to confirm initializer ran:
+  - docker compose logs -f --tail=200 openproject
 
-Safety notes & recommended follow-ups
-- Always back up the DB before modifying settings (pg_dump command above).
-- These changes are reversible through the same commands or restoring the DB backup.
-- After regaining access, properly configure 2FA:
-  - Install/configure SMTP so verification flows work.
-  - Re-enable 2FA enforcement only after users have registered/linked devices or backup codes are provisioned.
-  - Document recovery steps for admin access (eg: a disabled-secondary-admin account or documented Rails console fixes).
-- Audit logs: check OpenProject logs to confirm the setting change was applied and to verify no plugin errors remain.
-  docker compose logs --tail=200 openproject
+Emergency alternative: create an emergency admin user (if UI still blocked)
+- docker compose exec openproject bash -lc 'openproject run rails runner "u = User.find_by(login: '\''emergency_admin'\'') || User.create!(login: '\''emergency_admin'\'', firstname: '\''Emergency'\'', lastname: '\''Admin'\'', mail: '\''emergency@localhost'\'', password: '\''EmergencyAdmin24'\'', password_confirmation: '\''EmergencyAdmin24'\'', admin: true, status: User.statuses[:active]); u.otp_devices.destroy_all if u.respond_to?(:otp_devices); u.save!(validate:false); puts u.inspect"'
+
+Post-recovery tasks (must do)
+- Remove the emergency initializer and emergency admin account.
+- Configure SMTP and user enrollment; re-enable 2FA via environment or UI only after user devices/backup codes are available.
+- Audit logs to ensure no unauthorized access during emergency period.
+
+Why this solves the issue
+- The module TokenStrategyManager reads environment/config first. The docs explicitly support OPENPROJECT_2FA_DISABLED and OPENPROJECT_2FA_ENFORCED. Setting OPENPROJECT_2FA_DISABLED=true is the supported, simplest way to stop 2FA from being considered — this removes the 2FA authentication stage at boot. If configuration is cached or loaded earlier than where you can write the DB setting, the emergency initializer forces the TokenStrategyManager to report enabled?/enforced? as false so the authentication stage will not be activated — this is reversible and limited in scope.
 
 If you want, I can:
-- Create the script file in your repository (open a PR). (Tell me to proceed and I’ll create a branch + PR.)
-- Build an automated one‑click GH Actions maintenance job to run the disable/enable commands during emergency recovery.
-- Craft an INSERT/UPDATE snippet to create a temporary admin bypass user if you’d rather create a second admin account.
+- Produce a small pull request (initializer + README) for your repository to add this emergency initializer and helper script, or
+- Give the exact one-liner commands for your environment to set the env var in docker-compose and restart if you paste your docker-compose snippet for the openproject service.
 
-Next immediate step for you
-1. Run the DB backup command.
-2. Run the disable command (or the script).
-3. Clear sessions.
-4. Try logging in.
+If anything fails when you try these steps, paste:
+- output of: docker compose exec openproject bash -lc 'openproject run rails runner "p OpenProject::Configuration['\"'2fa'\"']; p Setting.plugin_openproject_two_factor_authentication; p ::OpenProject::TwoFactorAuthentication::TokenStrategyManager.enforced?; p ::OpenProject::TwoFactorAuthentication::TokenStrategyManager.enabled?"'
+- the last ~300 lines of logs: docker compose logs --tail=300 openproject
 
-If you run into any errors (copy/paste the exact output), generate an issue summary report.
+I’ll read them and give the exact minimal change tailored to the code paths in your build.
