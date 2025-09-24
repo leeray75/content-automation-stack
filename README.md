@@ -53,6 +53,316 @@ Before getting started, ensure you have the following installed:
    ./scripts/stop.sh
    ```
 
+## Optional Local Integrations
+
+The stack supports optional local integrations for enhanced development and demo workflows. These services are enabled via Docker Compose profiles and provide local instances of project management and design tools.
+
+### Available Integrations
+
+#### OpenProject (Project Management)
+- **Profile**: `openproject`
+- **Services**: Project management, task tracking, time tracking
+- **Access**: http://localhost:8082
+- **Database**: PostgreSQL (persistent)
+
+#### Penpot (Design & Prototyping)
+- **Profile**: `penpot`
+- **Services**: Design tool, prototyping, collaboration
+- **Frontend**: http://localhost:9001
+- **Backend API**: http://localhost:6060
+- **Exporter**: http://localhost:6061
+- **Database**: PostgreSQL (persistent)
+- **Cache**: Redis
+
+### Usage Commands
+
+#### Core Services Only (Default)
+```bash
+# Start only API, UI, and MCP services
+docker compose up
+./scripts/start.sh
+```
+
+#### With OpenProject
+```bash
+# Start core services + OpenProject
+docker compose --profile openproject up
+./scripts/start.sh --profile openproject
+
+# Build and start with OpenProject
+docker compose --profile openproject up --build
+./scripts/start.sh --profile openproject --build
+```
+
+#### With Penpot
+```bash
+# Start core services + Penpot
+docker compose --profile penpot up
+./scripts/start.sh --profile penpot
+
+# Build and start with Penpot
+docker compose --profile penpot up --build
+./scripts/start.sh --profile penpot --build
+```
+
+#### With Both Integrations
+```bash
+# Start all services
+docker compose --profile openproject --profile penpot up
+./scripts/start.sh --profile openproject --profile penpot
+
+# Build and start all services
+docker compose --profile openproject --profile penpot up --build
+./scripts/start.sh --profile openproject --profile penpot --build
+```
+
+### Service Endpoints
+
+| Service | URL | Purpose |
+|---------|-----|---------|
+| **Core Services** | | |
+| API | http://localhost:3000 | Content automation API |
+| UI | http://localhost:3001 | Web interface |
+| MCP Ingestion | http://localhost:3002 | MCP protocol service |
+| **OpenProject** | | |
+| Web Interface | http://localhost:8082 | Project management |
+| Health Check | http://localhost:8082/health_check | Service status |
+| **Penpot** | | |
+| Frontend | http://localhost:9001 | Design interface |
+| Backend API | http://localhost:6060 | API services |
+| API Info | http://localhost:6060/api/info | Service information |
+| Exporter | http://localhost:6061 | Export services |
+
+### First-Run Setup
+
+#### OpenProject Setup
+1. **Start OpenProject:**
+   ```bash
+   docker compose --profile openproject up -d
+   ```
+
+2. **Access the web interface:** http://localhost:8082
+
+3. **Initial login:**
+   - Username: `admin`
+   - Password: `admin`
+   - Change password on first login
+
+4. **Generate API token:**
+   - Go to Account Settings → Access tokens
+   - Create new token with required permissions
+   - Copy token to `.env` file:
+     ```env
+     OPENPROJECT_API_TOKEN=your_generated_token_here
+     ```
+
+5. **Restart core services** to pick up the new token:
+   ```bash
+   docker compose restart content-automation-api content-automation-ui content-automation-mcp-ingestion
+   ```
+
+#### Penpot Setup
+1. **Start Penpot:**
+   ```bash
+   docker compose --profile penpot up -d
+   ```
+
+2. **Access the frontend:** http://localhost:9001
+
+3. **Registration options:**
+   - **Demo mode**: Registration enabled by default (`PENPOT_ALLOW_REGISTRATION=true`)
+   - **Demo data**: Optionally enable with `PENPOT_PRELOAD_DEMO_DATA=true`
+
+4. **Create account:**
+   - Register new account via web interface
+   - Or use demo data if enabled
+
+5. **API access:**
+   - Generate API token through Penpot interface
+   - Add to `.env` file:
+     ```env
+     PENPOT_API_TOKEN=your_penpot_token_here
+     ```
+
+### Environment Configuration
+
+#### Required Variables
+Copy and customize these variables in your `.env` file:
+
+```env
+# OpenProject Integration
+OPENPROJECT_BASE_URL=http://openproject:8080
+OPENPROJECT_API_TOKEN=your_openproject_token
+
+# Penpot Integration
+PENPOT_FRONTEND_URL=http://penpot-frontend:9001
+PENPOT_BACKEND_URL=http://penpot-backend:6060
+PENPOT_EXPORTER_URL=http://penpot-exporter:6061
+PENPOT_API_TOKEN=your_penpot_token
+
+# Penpot Configuration
+PENPOT_PUBLIC_URI=http://localhost:9001
+PENPOT_SECRET_KEY=change-me-in-production
+PENPOT_ALLOW_REGISTRATION=true
+PENPOT_PRELOAD_DEMO_DATA=false
+```
+
+#### Enterprise Deployment
+For production/enterprise deployments, pin specific image versions:
+
+```env
+# Pin specific versions instead of 'latest'
+OPENPROJECT_IMAGE_TAG=13.0.0
+PENPOT_BACKEND_IMAGE_TAG=1.19.0
+PENPOT_FRONTEND_IMAGE_TAG=1.19.0
+PENPOT_EXPORTER_IMAGE_TAG=1.19.0
+```
+
+### Data Persistence
+
+All optional services use persistent volumes:
+
+- **OpenProject**: Database and application data persist across restarts
+- **Penpot**: Database, assets, and Redis data persist across restarts
+
+#### Volume Management
+```bash
+# List all volumes
+docker volume ls
+
+# Inspect specific volumes
+docker volume inspect content-automation-stack_openproject_db_data
+docker volume inspect content-automation-stack_penpot_db_data
+
+# Remove volumes (⚠️ data will be lost)
+docker compose down --volumes
+```
+
+### Health Monitoring
+
+#### Check Service Health
+```bash
+# Core services
+curl http://localhost:3000/health    # API
+curl http://localhost:3001/          # UI
+curl http://localhost:3002/health    # MCP
+
+# OpenProject
+curl http://localhost:8082/health_check
+
+# Penpot
+curl http://localhost:6060/api/info  # Backend
+curl http://localhost:9001/          # Frontend
+curl http://localhost:6061/          # Exporter
+```
+
+#### Service Status
+```bash
+# Check all services
+docker compose ps
+
+# Check specific profiles
+docker compose --profile openproject ps
+docker compose --profile penpot ps
+```
+
+### Troubleshooting
+
+#### Common Issues
+
+**1. Port conflicts:**
+```bash
+# Check what's using the ports
+lsof -i :8082  # OpenProject
+lsof -i :9001  # Penpot Frontend
+lsof -i :6060  # Penpot Backend
+lsof -i :6061  # Penpot Exporter
+```
+
+**2. Database initialization:**
+```bash
+# Wait for databases to initialize (first run takes longer)
+docker compose logs openproject-db
+docker compose logs penpot-db
+
+# Check database health
+docker compose exec openproject-db pg_isready -U openproject
+docker compose exec penpot-db pg_isready -U penpot
+```
+
+**3. Service startup order:**
+```bash
+# Services start in dependency order:
+# 1. Databases (PostgreSQL, Redis)
+# 2. Backend services
+# 3. Frontend services
+
+# Check startup progress
+docker compose logs --follow openproject
+docker compose logs --follow penpot-backend
+```
+
+**4. Memory requirements:**
+```bash
+# Optional services require additional memory
+# Recommended: 8GB+ RAM for full stack
+# Monitor resource usage:
+docker stats
+```
+
+#### Reset Optional Services
+```bash
+# Stop and remove optional service data
+docker compose --profile openproject --profile penpot down --volumes
+
+# Restart with fresh data
+docker compose --profile openproject --profile penpot up --build
+```
+
+### Integration with Core Services
+
+The core services (API, UI, MCP) automatically receive environment variables for optional services when profiles are active:
+
+- **API Service**: Can make HTTP requests to OpenProject/Penpot APIs
+- **UI Service**: Can display links and integrate with external tools
+- **MCP Service**: Can ingest data from project management and design tools
+
+#### Example Integration Code
+
+**API Service Integration:**
+```javascript
+// Check if OpenProject is available
+if (process.env.OPENPROJECT_BASE_URL && process.env.OPENPROJECT_API_TOKEN) {
+  // Make API calls to OpenProject
+  const response = await fetch(`${process.env.OPENPROJECT_BASE_URL}/api/v3/projects`, {
+    headers: { 'Authorization': `Bearer ${process.env.OPENPROJECT_API_TOKEN}` }
+  });
+}
+
+// Check if Penpot is available
+if (process.env.PENPOT_BACKEND_URL && process.env.PENPOT_API_TOKEN) {
+  // Make API calls to Penpot
+  const response = await fetch(`${process.env.PENPOT_BACKEND_URL}/api/projects`, {
+    headers: { 'Authorization': `Bearer ${process.env.PENPOT_API_TOKEN}` }
+  });
+}
+```
+
+**UI Service Integration:**
+```javascript
+// Next.js environment variables (prefixed with NEXT_PUBLIC_)
+const openProjectUrl = process.env.NEXT_PUBLIC_OPENPROJECT_BASE_URL;
+const penpotUrl = process.env.NEXT_PUBLIC_PENPOT_FRONTEND_URL;
+
+// Conditionally show integration links
+{openProjectUrl && (
+  <a href={openProjectUrl} target="_blank">Open Project Management</a>
+)}
+{penpotUrl && (
+  <a href={penpotUrl} target="_blank">Open Design Tool</a>
+)}
+```
+
 ## Project Structure
 
 ```

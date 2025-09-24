@@ -11,10 +11,17 @@ services:
       - PORT=3000
       - DATABASE_URL=${DATABASE_URL:-}
       - JWT_SECRET=${JWT_SECRET:-dev-secret}
+      # Internal service URLs for in-container calls
+      - OPENPROJECT_BASE_URL=${OPENPROJECT_BASE_URL:-http://openproject}
+      - OPENPROJECT_API_TOKEN=${OPENPROJECT_API_TOKEN:-}
+      - PENPOT_FRONTEND_URL=${PENPOT_FRONTEND_URL:-http://penpot-frontend:9001}
+      - PENPOT_BACKEND_URL=${PENPOT_BACKEND_URL:-http://penpot-backend:6060}
+      - PENPOT_EXPORTER_URL=${PENPOT_EXPORTER_URL:-http://penpot-exporter:6061}
+      - PENPOT_API_TOKEN=${PENPOT_API_TOKEN:-}
     networks:
       - content-automation-network
     healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) })"]
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://localhost:3000/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -30,18 +37,23 @@ services:
       - "${UI_PORT:-3001}:3000"
     environment:
       - NODE_ENV=${NODE_ENV:-development}
+      # Browser-facing URLs should point to host-exposed ports
       - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:3000}
+      - NEXT_PUBLIC_OPENPROJECT_BASE_URL=${NEXT_PUBLIC_OPENPROJECT_BASE_URL:-http://localhost:8082}
+      - NEXT_PUBLIC_PENPOT_FRONTEND_URL=${NEXT_PUBLIC_PENPOT_FRONTEND_URL:-http://localhost:9001}
+      - NEXT_PUBLIC_PENPOT_BACKEND_URL=${NEXT_PUBLIC_PENPOT_BACKEND_URL:-http://localhost:6060}
     networks:
       - content-automation-network
     depends_on:
       content-automation-api:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) })"]
+      # Follow redirects and tolerate slower cold starts
+      test: ["CMD-SHELL", "curl -fsSL -o /dev/null http://localhost:3000/ || exit 1"]
       interval: 30s
       timeout: 10s
-      retries: 3
-      start_period: 40s
+      retries: 5
+      start_period: 60s
     restart: unless-stopped
 
   content-automation-mcp-ingestion:
@@ -57,17 +69,212 @@ services:
       - MCP_SERVER_NAME=${MCP_SERVER_NAME:-content-automation-mcp-ingestion}
       - MCP_SERVER_VERSION=${MCP_SERVER_VERSION:-0.1.0}
       - MCP_AUTH_ENABLED=${MCP_AUTH_ENABLED:-false}
+      # Internal service URLs for in-container calls
+      - OPENPROJECT_BASE_URL=${OPENPROJECT_BASE_URL:-http://openproject}
+      - OPENPROJECT_API_TOKEN=${OPENPROJECT_API_TOKEN:-}
+      - PENPOT_FRONTEND_URL=${PENPOT_FRONTEND_URL:-http://penpot-frontend:9001}
+      - PENPOT_BACKEND_URL=${PENPOT_BACKEND_URL:-http://penpot-backend:6060}
+      - PENPOT_EXPORTER_URL=${PENPOT_EXPORTER_URL:-http://penpot-exporter:6061}
+      - PENPOT_API_TOKEN=${PENPOT_API_TOKEN:-}
     networks:
       - content-automation-network
     depends_on:
       content-automation-api:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3001/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) })"]
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://localhost:3001/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
+    restart: unless-stopped
+
+  # Optional OpenProject services (enable via --profile openproject)
+  openproject-db:
+    image: postgres:16.10
+    profiles: ["openproject"]
+    container_name: openproject-db
+    environment:
+      POSTGRES_USER: openproject
+      POSTGRES_PASSWORD: openproject
+      POSTGRES_DB: openproject
+    volumes:
+      - openproject_db_data:/var/lib/postgresql/data
+    networks:
+      - content-automation-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U openproject"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # Initializes required Postgres extensions for OpenProject (safe to re-run)
+  openproject-db-init:
+    image: postgres:16.10
+    profiles: ["openproject"]
+    container_name: openproject-db-init
+    depends_on:
+      openproject-db:
+        condition: service_healthy
+    entrypoint: ["/bin/sh","-lc"]
+    command: >
+      "psql -h openproject-db -U openproject -d openproject -v ON_ERROR_STOP=1
+      -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm;'
+      -c 'CREATE EXTENSION IF NOT EXISTS btree_gin;'
+      -c 'CREATE EXTENSION IF NOT EXISTS pgcrypto;' && echo 'Extensions ensured.'"
+    environment:
+      PGPASSWORD: openproject
+    networks:
+      - content-automation-network
+    restart: "no"
+
+  openproject:
+    image: openproject/openproject:${OPENPROJECT_IMAGE_TAG:-16.4.1-slim}
+    profiles: ["openproject"]
+    container_name: openproject
+    depends_on:
+      openproject-db:
+        condition: service_healthy
+      openproject-db-init:
+        condition: service_completed_successfully
+    ports:
+      # Slim variant listens on 8080 inside
+      - "8082:8080"
+    environment:
+      OPENPROJECT_HTTPS: "false"
+      OPENPROJECT_HOST__NAME: localhost:8082
+      OPENPROJECT_SECRET_KEY_BASE: ${OPENPROJECT_SECRET_KEY_BASE:-change-this-to-a-long-random-string}
+      OPENPROJECT_DEFAULT__LANGUAGE: "en"
+      DATABASE_URL: postgresql://openproject:openproject@openproject-db:5432/openproject
+    volumes:
+      - openproject_assets:/var/openproject/assets
+    networks:
+      - content-automation-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://localhost:8080/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 30
+      start_period: 600s
+    restart: unless-stopped
+
+  # Optional Penpot services (enable via --profile penpot)
+  penpot-db:
+    image: postgres:16.10
+    profiles: ["penpot"]
+    container_name: penpot-db
+    environment:
+      POSTGRES_USER: penpot
+      POSTGRES_PASSWORD: penpot
+      POSTGRES_DB: penpot
+    volumes:
+      - penpot_db_data:/var/lib/postgresql/data
+    networks:
+      - content-automation-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U penpot"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  penpot-redis:
+    image: redis:7
+    profiles: ["penpot"]
+    container_name: penpot-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    networks:
+      - content-automation-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  penpot-backend:
+    image: penpotapp/backend:${PENPOT_BACKEND_IMAGE_TAG:-2.9.0}
+    profiles: ["penpot"]
+    container_name: penpot-backend
+    depends_on:
+      penpot-db:
+        condition: service_healthy
+      penpot-redis:
+        condition: service_healthy
+    ports:
+      - "6060:6060"
+    environment:
+      PENPOT_PUBLIC_URI: ${PENPOT_PUBLIC_URI:-http://localhost:9001}
+      # Use query params to avoid Java parsing '@' into hostname
+      PENPOT_DATABASE_URI: postgresql://penpot-db:5432/penpot?user=penpot&password=penpot&sslmode=disable
+      PENPOT_REDIS_URI: redis://penpot-redis:6379/0
+      PENPOT_SECRET_KEY: ${PENPOT_SECRET_KEY:-change-me}
+      PENPOT_ALLOW_REGISTRATION: ${PENPOT_ALLOW_REGISTRATION:-true}
+      PENPOT_PRELOAD_DEMO_DATA: ${PENPOT_PRELOAD_DEMO_DATA:-false}
+      PENPOT_FLAGS: ${PENPOT_FLAGS:-enable-registration enable-login-with-password}
+      PENPOT_TELEMETRY_ENABLED: ${PENPOT_TELEMETRY_ENABLED:-false}
+      PENPOT_STORAGE_ASSETS_BACKEND: assets-fs
+      PENPOT_STORAGE_ASSETS_FS_DIRECTORY: /opt/data/assets
+    volumes:
+      - penpot_assets:/opt/data/assets
+    networks:
+      - content-automation-network
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >
+          python3 -c "import http.client,sys;
+          c=http.client.HTTPConnection('127.0.0.1',6060,timeout=3);
+          c.request('GET','/readyz'); r=c.getresponse();
+          sys.exit(0 if r.status==200 else 1)"
+      interval: 20s
+      timeout: 5s
+      retries: 15
+    restart: unless-stopped
+
+  penpot-frontend:
+    image: penpotapp/frontend:${PENPOT_FRONTEND_IMAGE_TAG:-2.9.0}
+    profiles: ["penpot"]
+    container_name: penpot-frontend
+    depends_on:
+      penpot-backend:
+        condition: service_healthy
+    ports:
+      - "9001:8080"                             # Frontend listens on port 8080 inside container
+    environment:
+      PENPOT_PUBLIC_URI: ${PENPOT_PUBLIC_URI:-http://localhost:9001}
+      PENPOT_BACKEND_URI: http://penpot-backend:6060
+      PENPOT_EXPORTER_URI: http://penpot-exporter:6061
+    volumes:
+      - penpot_assets:/opt/data
+    networks:
+      - content-automation-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://localhost:8080/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 30
+      start_period: 120s                        # Give nginx time to template config & warm up
+    restart: unless-stopped
+
+  penpot-exporter:
+    image: penpotapp/exporter:${PENPOT_EXPORTER_IMAGE_TAG:-2.9.0}
+    profiles: ["penpot"]
+    container_name: penpot-exporter
+    depends_on:
+      penpot-backend:
+        condition: service_healthy
+    ports:
+      - "6061:6061"
+    networks:
+      - content-automation-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://localhost:6061/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
     restart: unless-stopped
 
 networks:
@@ -79,3 +286,11 @@ volumes:
   api_node_modules:
   ui_node_modules:
   mcp_node_modules:
+  # OpenProject volumes
+  openproject_db_data:
+  openproject_assets:
+  # Penpot volumes
+  penpot_db_data:
+  penpot_assets:
+  # Core manifest storage
+  manifest_data:
