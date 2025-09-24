@@ -319,6 +319,55 @@ docker compose --profile openproject --profile penpot down --volumes
 docker compose --profile openproject --profile penpot up --build
 ```
 
+#### OpenProject Environment Reset
+
+For OpenProject-specific issues (especially 2FA problems), use the dedicated reset script:
+
+```bash
+# Interactive reset (with confirmation prompts)
+./ai-workspace/scripts/reset-openproject.sh
+
+# Non-interactive reset (for automation)
+./ai-workspace/scripts/reset-openproject.sh --yes
+
+# Reset with specific image version
+./ai-workspace/scripts/reset-openproject.sh --tag 13.4.1-slim
+
+# Reset with verbose output
+./ai-workspace/scripts/reset-openproject.sh --yes --verbose
+
+# Get help and see all options
+./ai-workspace/scripts/reset-openproject.sh --help
+```
+
+**⚠️ WARNING**: This script performs a **destructive reset** that will permanently delete:
+- All OpenProject database data
+- All OpenProject assets and uploads  
+- All user accounts and project data
+- All OpenProject configuration
+
+**What the script does:**
+1. Stops and removes all OpenProject containers
+2. Removes OpenProject volumes (`openproject_db_data`, `openproject_assets`)
+3. Pulls the latest (or specified) OpenProject image
+4. Starts fresh OpenProject services with 2FA disabled
+5. Verifies startup and configuration
+6. Provides access instructions
+
+**After reset:**
+- Access OpenProject at: http://localhost:8082
+- Default credentials: `admin` / `admin`
+- 2FA will be disabled
+- Fresh database with no existing data
+
+**Use cases:**
+- Resolving persistent 2FA enforcement issues
+- Starting with a clean OpenProject environment
+- Testing different OpenProject versions
+- Recovering from configuration problems
+
+For more details, see the implementation plan: `ai-workspace/planning/issue-10-implementation-plan.md`
+
 ### Integration with Core Services
 
 The core services (API, UI, MCP) automatically receive environment variables for optional services when profiles are active:

@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2025-09-24
+### Added
+- [issue-10](https://github.com/leeray75/content-automation-stack/issues/10) - OpenProject Environment Reset Script with comprehensive cleanup and restart functionality
+
+### Fixed
+- [issue-10](https://github.com/leeray75/content-automation-stack/issues/10) - OpenProject admin login issue resolved by creating missing admin user in database
+
 ### Added
 - [issue-5](https://github.com/leeray75/content-automation-stack/issues/5) - Optional OpenProject and Penpot integrations for manifest-centric workflow
 - Docker Compose profiles for optional local integrations:
