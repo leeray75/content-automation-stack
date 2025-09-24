@@ -144,6 +144,9 @@ services:
     environment:
       OPENPROJECT_HTTPS: "false"
       OPENPROJECT_2FA_ENFORCED: "false" 
+      OPENPROJECT_2FA_DISABLED: "true"
+      OPENPROJECT_2FA_ACTIVE__STRATEGIES: "[]"
+      OPENPROJECT_EMERGENCY_DISABLE_2FA: "true"
       OPENPROJECT_HOST__NAME: localhost:8082
       OPENPROJECT_SECRET_KEY_BASE: ${OPENPROJECT_SECRET_KEY_BASE:-change-this-to-a-long-random-string}
       OPENPROJECT_DEFAULT__LANGUAGE: "en"
