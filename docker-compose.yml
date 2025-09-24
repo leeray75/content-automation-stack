@@ -12,7 +12,7 @@ services:
       - DATABASE_URL=${DATABASE_URL:-}
       - JWT_SECRET=${JWT_SECRET:-dev-secret}
       # Internal service URLs for in-container calls
-      - OPENPROJECT_BASE_URL=${OPENPROJECT_BASE_URL:-http://openproject}
+      - OPENPROJECT_BASE_URL=${OPENPROJECT_BASE_URL:-http://openproject:8080}
       - OPENPROJECT_API_TOKEN=${OPENPROJECT_API_TOKEN:-}
       - PENPOT_FRONTEND_URL=${PENPOT_FRONTEND_URL:-http://penpot-frontend:9001}
       - PENPOT_BACKEND_URL=${PENPOT_BACKEND_URL:-http://penpot-backend:6060}
@@ -70,7 +70,7 @@ services:
       - MCP_SERVER_VERSION=${MCP_SERVER_VERSION:-0.1.0}
       - MCP_AUTH_ENABLED=${MCP_AUTH_ENABLED:-false}
       # Internal service URLs for in-container calls
-      - OPENPROJECT_BASE_URL=${OPENPROJECT_BASE_URL:-http://openproject}
+      - OPENPROJECT_BASE_URL=${OPENPROJECT_BASE_URL:-http://openproject:8080}
       - OPENPROJECT_API_TOKEN=${OPENPROJECT_API_TOKEN:-}
       - PENPOT_FRONTEND_URL=${PENPOT_FRONTEND_URL:-http://penpot-frontend:9001}
       - PENPOT_BACKEND_URL=${PENPOT_BACKEND_URL:-http://penpot-backend:6060}
@@ -216,7 +216,7 @@ services:
       PENPOT_SECRET_KEY: ${PENPOT_SECRET_KEY:-change-me}
       PENPOT_ALLOW_REGISTRATION: ${PENPOT_ALLOW_REGISTRATION:-true}
       PENPOT_PRELOAD_DEMO_DATA: ${PENPOT_PRELOAD_DEMO_DATA:-false}
-      PENPOT_FLAGS: ${PENPOT_FLAGS:-enable-registration enable-login-with-password}
+      PENPOT_FLAGS: ${PENPOT_FLAGS:-disable-email-verification enable-registration enable-login-with-password}
       PENPOT_TELEMETRY_ENABLED: ${PENPOT_TELEMETRY_ENABLED:-false}
       PENPOT_STORAGE_ASSETS_BACKEND: assets-fs
       PENPOT_STORAGE_ASSETS_FS_DIRECTORY: /opt/data/assets
