@@ -14,6 +14,7 @@ services:
       # Internal service URLs for in-container calls
       - OPENPROJECT_BASE_URL=${OPENPROJECT_BASE_URL:-http://openproject:8080}
       - OPENPROJECT_API_TOKEN=${OPENPROJECT_API_TOKEN:-}
+      - OPENPROJECT_HOST_HEADER=${OPENPROJECT_HOST_HEADER:-localhost:8082}
       - PENPOT_FRONTEND_URL=${PENPOT_FRONTEND_URL:-http://penpot-frontend:9001}
       - PENPOT_BACKEND_URL=${PENPOT_BACKEND_URL:-http://penpot-backend:6060}
       - PENPOT_EXPORTER_URL=${PENPOT_EXPORTER_URL:-http://penpot-exporter:6061}
